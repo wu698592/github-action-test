@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: '请输入版本号 (例如 v1.0.1)'
+        description: '请输入要打包的 Tag (必须是已推送到 Git 的 Tag)'
         required: true
         default: 'v1.0.0'
 
@@ -16,8 +16,11 @@ jobs:
       contents: read
 
     steps:
-      - name: 1. 拉取代码
+      - name: 1. 拉取指定版本的代码
         uses: actions/checkout@v4
+        with:
+          # 如果输入的 Tag 不存在，这一步会自动报错停止
+          ref: ${{ github.event.inputs.version_tag }}
 
       - name: 2. 登录 GitHub 镜像库
         uses: docker/login-action@v3
@@ -28,17 +31,11 @@ jobs:
 
       - name: 3. 构建并推送镜像
         run: |
-          # 转换镜像名为全小写 (GHCR 强制要求)
           IMAGE_ID=ghcr.io/${{ github.repository }}
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           VERSION=${{ github.event.inputs.version_tag }}
           
-          echo "镜像名称: $IMAGE_ID"
-          echo "版本标签: $VERSION"
-
-          # 构建镜像
-          docker build . --file Dockerfile -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest
-          
-          # 推送指定版本和 latest 版本
+          # 此时的代码已经是 Tag 对应的代码了
+          docker build . -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest
           docker push $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:latest
