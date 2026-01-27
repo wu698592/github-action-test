@@ -2,45 +2,44 @@ name: Deploy to Server
 
 on:
   workflow_dispatch:
-    # 去掉了版本号输入，因为 UI 选分支已经决定了版本
 
 jobs:
   deploy:
     runs-on: [self-hosted, jinan-1]
     
     steps:
-      - name: 1. 拉取当前配置代码
-        uses: actions/checkout@v4
-
-      - name: 2. 执行容器部署
-        env:
-          # 自动获取当前运行的 分支/Tag 名
-          REF_NAME: ${{ github.ref_name }}
+      - name: 1. 优化 Git 环境 (解决网络握手问题)
         run: |
-          # 1. 准备镜像 ID
+          # 最佳实践：在 checkout 前注入稳定性配置
+          git config --global http.version HTTP/1.1
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+
+      - name: 2. 拉取代码 (使用官方插件)
+        uses: actions/checkout@v4
+        with:
+          # 只拉取一层，减少传输时间，降低连接中断概率
+          fetch-depth: 1
+
+      - name: 3. 执行容器部署
+        run: |
+          # 准备镜像元数据
           IMAGE_ID=ghcr.io/${{ github.repository }}
           IMAGE_ID=$(echo "${IMAGE_ID}" | tr '[A-Z]' '[a-z]')
           
-          # 2. 处理分支名中的斜杠 (需与 Build 脚本逻辑一致)
-          SAFE_VERSION=$(echo "${REF_NAME}" | sed 's/\//-/g')
-          export IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
+          # 自动识别 UI 选的分支/Tag
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          export IMAGE_FULL_NAME="${IMAGE_ID}:${VERSION}"
           
-          echo "🚀 准备部署镜像: ${IMAGE_FULL_NAME}"
+          echo "🚀 准备部署: ${IMAGE_FULL_NAME}"
 
-          # 3. 登录 GHCR (使用 Runner 环境已有的权限或 Secret)
+          # 登录 GitHub 镜像库 (推荐使用内置 GITHUB_TOKEN)
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # 4. 部署流程
-          # 强制拉取最新镜像，防止服务器本地缓存了旧的分支镜像
+          # 部署流程
           docker compose pull
-          
-          # 滚动启动
           docker compose up -d
           
-          # 5. 最佳实践：清理过期镜像 (仅保留当前使用的)
-          # 这会删除所有没有容器使用的残留镜像
+          # 清理旧镜像
           docker image prune -f
-          
-          echo "✅ 部署完成！"
-          echo "当前版本: ${SAFE_VERSION}"
-          echo "部署时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "✅ 部署成功！"
