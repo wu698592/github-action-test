@@ -1,0 +1,24 @@
+name: Tag Trigger Test
+
+# 只有推送 v 开头的标签才触发（如 v1, v1.0）
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  hello-world:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step 1 - 打印欢迎语
+        run: echo "GitHub Action 成功启动了！"
+
+      - name: Step 2 - 显示当前版本号
+        run: |
+          echo "你刚刚推送的标签是: ${{ github.ref_name }}"
+          echo "当前的虚拟机环境已经准备好，随时可以打包镜像。"
+
+      - name: Step 3 - 查看虚拟机里的工具
+        run: |
+          docker --version
+          node -v
