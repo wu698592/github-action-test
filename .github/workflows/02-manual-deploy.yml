@@ -10,45 +10,35 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # 1. 核心修改：改为你刚才安装好的 Runner
+    runs-on: self-hosted
+
     steps:
-      - name: 1. 拉取代码
+      - name: 1. 拉取代码到服务器本地
         uses: actions/checkout@v4
 
-      - name: 2. 拷贝 Compose 文件
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml"
-          target: "${{ vars.DEPLOY_PATH }}"
-
-      - name: 3. 远程执行部署
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # 进入变量定义的目录
-            cd ${{ vars.DEPLOY_PATH }}
-            
-            # 准备镜像名称和版本
-            IMAGE_ID=ghcr.io/${{ github.repository }}
-            IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
-            VERSION=${{ github.event.inputs.version_tag }}
-            
-            # 在服务器上登录 GHCR (确保能拉取镜像)
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # 注入环境变量给 docker-compose.yml 使用
-            export IMAGE_FULL_NAME=$IMAGE_ID:$VERSION
-            
-            echo "开始拉取镜像: $IMAGE_FULL_NAME"
-            docker compose pull
-            docker compose up -d
-            
-            # 清理无用镜像（保持服务器整洁）
-            docker image prune -f
-            echo "🚀 部署完成！版本：$VERSION"
+      - name: 2. 部署容器
+        run: |
+          # 因为 runs-on: self-hosted，以下命令直接在你的内网服务器执行
+          
+          # 进入项目目录 (Runner 会自动创建路径，通常不需要 cd，但为了保险可以根据你的 vars 改)
+          # 注意：checkout 默认会把代码拉到当前目录
+          
+          # 准备镜像名
+          IMAGE_ID=ghcr.io/${{ github.repository }}
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+          VERSION=${{ github.event.inputs.version_tag }}
+          
+          # 登录 GitHub 镜像库
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # 设置变量并启动
+          export IMAGE_FULL_NAME=$IMAGE_ID:$VERSION
+          
+          echo "开始拉取镜像并部署: $IMAGE_FULL_NAME"
+          docker compose pull
+          docker compose up -d
+          
+          # 清理
+          docker image prune -f
+          echo "🚀 部署完成！版本：$VERSION"
