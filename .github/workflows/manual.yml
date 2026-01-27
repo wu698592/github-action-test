@@ -1,0 +1,24 @@
+name: Manual Button Test
+
+# 触发条件：
+on:
+  workflow_dispatch:    # 方式2：手动点击按钮触发（这就是你要的）
+    inputs:             # (可选) 手动点击时可以输入的参数
+      deploy_env:
+        description: '部署环境'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  manual-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hello
+        run: |
+          echo "按钮点击成功！"
+          echo "选择的环境是: ${{ github.event.inputs.deploy_env }}"
+          echo "当前运行的分支/标签是: ${{ github.ref_name }}"
