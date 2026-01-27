@@ -1,44 +1,46 @@
-name: deploy
+name: Deploy to Server
 
 on:
   workflow_dispatch:
-    inputs:
-      version_tag:
-        description: '请输入要部署的版本号 (需已在 Packages 中存在)'
-        required: true
-        default: 'v1.0.0'
+    # 去掉了版本号输入，因为 UI 选分支已经决定了版本
 
 jobs:
   deploy:
-    # 1. 核心修改：改为你刚才安装好的 Runner
     runs-on: [self-hosted, jinan-1]
     
     steps:
-      - name: 1. 拉取代码到服务器本地
+      - name: 1. 拉取当前配置代码
         uses: actions/checkout@v4
 
-      - name: 2. 部署容器
+      - name: 2. 执行容器部署
+        env:
+          # 自动获取当前运行的 分支/Tag 名
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          # 因为 runs-on: self-hosted，以下命令直接在你的内网服务器执行
-          
-          # 进入项目目录 (Runner 会自动创建路径，通常不需要 cd，但为了保险可以根据你的 vars 改)
-          # 注意：checkout 默认会把代码拉到当前目录
-          
-          # 准备镜像名
+          # 1. 准备镜像 ID
           IMAGE_ID=ghcr.io/${{ github.repository }}
-          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
-          VERSION=${{ github.event.inputs.version_tag }}
+          IMAGE_ID=$(echo "${IMAGE_ID}" | tr '[A-Z]' '[a-z]')
           
-          # 登录 GitHub 镜像库
-          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # 2. 处理分支名中的斜杠 (需与 Build 脚本逻辑一致)
+          SAFE_VERSION=$(echo "${REF_NAME}" | sed 's/\//-/g')
+          export IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
           
-          # 设置变量并启动
-          export IMAGE_FULL_NAME=$IMAGE_ID:$VERSION
+          echo "🚀 准备部署镜像: ${IMAGE_FULL_NAME}"
+
+          # 3. 登录 GHCR (使用 Runner 环境已有的权限或 Secret)
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          echo "开始拉取镜像并部署: $IMAGE_FULL_NAME"
+          # 4. 部署流程
+          # 强制拉取最新镜像，防止服务器本地缓存了旧的分支镜像
           docker compose pull
+          
+          # 滚动启动
           docker compose up -d
           
-          # 清理
+          # 5. 最佳实践：清理过期镜像 (仅保留当前使用的)
+          # 这会删除所有没有容器使用的残留镜像
           docker image prune -f
-          echo "🚀 部署完成！版本：$VERSION"
+          
+          echo "✅ 部署完成！"
+          echo "当前版本: ${SAFE_VERSION}"
+          echo "部署时间: $(date '+%Y-%m-%d %H:%M:%S')"
