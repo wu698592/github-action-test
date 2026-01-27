@@ -1,8 +1,8 @@
 services:
-  action-test-service:
-    # 使用 nginx 镜像作为测试，它自带一个欢迎页面
-    image: nginx:alpine
-    container_name: github-action-test-container
+  web-app:
+    # 脚本里的 export 会填充这个变量
+    image: ${IMAGE_FULL_NAME}
+    container_name: my-test-container
     ports:
-      - "56789:80"  # 物理机的 56789 映射到容器的 80
+      - "56789:80"
     restart: always
