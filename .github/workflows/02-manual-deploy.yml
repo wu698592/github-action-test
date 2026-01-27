@@ -2,32 +2,53 @@ name: 02-手动部署到服务器
 
 on:
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: '请输入要部署的版本号 (需已在 Packages 中存在)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: 1. 拉取代码
+        uses: actions/checkout@v4
 
-      - name: Copy Compose File
+      - name: 2. 拷贝 Compose 文件
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "docker-compose.yml"
-          target: "/app/my-project"
+          target: "${{ vars.DEPLOY_PATH }}"
 
-      - name: Remote SSH Deploy
+      - name: 3. 远程执行部署
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /app/my-project
-            # 临时登录 GHCR
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # 进入变量定义的目录
+            cd ${{ vars.DEPLOY_PATH }}
+            
+            # 准备镜像名称和版本
+            IMAGE_ID=ghcr.io/${{ github.repository }}
+            IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+            VERSION=${{ github.event.inputs.version_tag }}
+            
+            # 在服务器上登录 GHCR (确保能拉取镜像)
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 注入环境变量给 docker-compose.yml 使用
+            export IMAGE_FULL_NAME=$IMAGE_ID:$VERSION
+            
+            echo "开始拉取镜像: $IMAGE_FULL_NAME"
             docker compose pull
             docker compose up -d
-            echo "部署完成！"
+            
+            # 清理无用镜像（保持服务器整洁）
+            docker image prune -f
+            echo "🚀 部署完成！版本：$VERSION"
