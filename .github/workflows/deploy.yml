@@ -8,38 +8,38 @@ jobs:
     runs-on: [self-hosted, jinan-1]
     
     steps:
-      - name: 1. 优化 Git 环境 (解决网络握手问题)
+      - name: 1. 拉取代码 (最佳原生实践)
+        # 这种方式直接利用你宿主机已经验证过的网络通路
         run: |
-          # 最佳实践：在 checkout 前注入稳定性配置
-          git config --global http.version HTTP/1.1
-          git config --global http.postBuffer 524288000
-          git config --global core.compression 0
+          echo "Checking out ${{ github.ref_name }}..."
+          # 如果目录不存在则克隆，存在则强制刷新
+          if [ ! -d ".git" ]; then
+            git clone --depth 1 -b ${{ github.ref_name }} https://github.com/${{ github.repository }}.git .
+          else
+            git remote set-url origin https://github.com/${{ github.repository }}.git
+            git fetch origin ${{ github.ref_name }} --depth 1
+            git reset --hard FETCH_HEAD
+          fi
 
-      - name: 2. 拉取代码 (使用官方插件)
-        uses: actions/checkout@v4
-        with:
-          # 只拉取一层，减少传输时间，降低连接中断概率
-          fetch-depth: 1
-
-      - name: 3. 执行容器部署
+      - name: 2. 执行容器部署
         run: |
-          # 准备镜像元数据
+          # 1. 变量标准化处理
           IMAGE_ID=ghcr.io/${{ github.repository }}
           IMAGE_ID=$(echo "${IMAGE_ID}" | tr '[A-Z]' '[a-z]')
           
-          # 自动识别 UI 选的分支/Tag
-          VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
-          export IMAGE_FULL_NAME="${IMAGE_ID}:${VERSION}"
+          # 2. 版本自动识别
+          SAFE_VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          export IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
           
-          echo "🚀 准备部署: ${IMAGE_FULL_NAME}"
+          echo "🚀 部署镜像: ${IMAGE_FULL_NAME}"
 
-          # 登录 GitHub 镜像库 (推荐使用内置 GITHUB_TOKEN)
+          # 3. 登录镜像库 (使用内置 Token)
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # 部署流程
+          # 4. 生产环境部署标准动作
           docker compose pull
           docker compose up -d
           
-          # 清理旧镜像
+          # 5. 存储空间管理
           docker image prune -f
-          echo "✅ 部署成功！"
+          echo "✅ 部署完成！"
