@@ -4,31 +4,41 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: '请输入要打包的版本号 (例如 v1.0.0)'
+        description: '请输入版本号 (例如 v1.0.1)'
         required: true
         default: 'v1.0.0'
 
 jobs:
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+    steps:
+      - name: 1. 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 2. 登录 GitHub 镜像库
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push
+      - name: 3. 构建并推送镜像
         run: |
-          # 将输入的版本号存入环境变量
+          # 转换镜像名为全小写 (GHCR 强制要求)
+          IMAGE_ID=ghcr.io/${{ github.repository }}
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           VERSION=${{ github.event.inputs.version_tag }}
-          echo "正在打包版本: $VERSION"
-          # 假设你的 compose 里使用了变量，或者这里直接 build
-          docker compose build
-          docker compose push
+          
+          echo "镜像名称: $IMAGE_ID"
+          echo "版本标签: $VERSION"
+
+          # 构建镜像
+          docker build . --file Dockerfile -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest
+          
+          # 推送指定版本和 latest 版本
+          docker push $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:latest
