@@ -1,0 +1,34 @@
+name: 01-手动打包镜像
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: '请输入要打包的版本号 (例如 v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        run: |
+          # 将输入的版本号存入环境变量
+          VERSION=${{ github.event.inputs.version_tag }}
+          echo "正在打包版本: $VERSION"
+          # 假设你的 compose 里使用了变量，或者这里直接 build
+          docker compose build
+          docker compose push
