@@ -1,4 +1,4 @@
-name: 02-手动部署到服务器
+name: deploy
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ on:
 jobs:
   deploy:
     # 1. 核心修改：改为你刚才安装好的 Runner
-    runs-on: self-hosted
-
+    runs-on: [self-hosted, jinan-1]
+    
     steps:
       - name: 1. 拉取代码到服务器本地
         uses: actions/checkout@v4
