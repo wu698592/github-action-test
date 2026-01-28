@@ -1,45 +1,49 @@
 name: Deploy to Server
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发部署
 
 jobs:
   deploy:
     runs-on: [self-hosted, jinan-1]
     
     steps:
-      - name: 1. 拉取代码 (最佳原生实践)
-        # 这种方式直接利用你宿主机已经验证过的网络通路
+      - name: 1. 拉取最新代码
         run: |
           echo "Checking out ${{ github.ref_name }}..."
-          # 如果目录不存在则克隆，存在则强制刷新
+          # 使用 GITHUB_TOKEN 解决私有仓库拉取时的用户名密码问题
+          REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          
           if [ ! -d ".git" ]; then
-            git clone --depth 1 -b ${{ github.ref_name }} https://github.com/${{ github.repository }}.git .
+            git clone --depth 1 -b ${{ github.ref_name }} $REPO_URL .
           else
-            git remote set-url origin https://github.com/${{ github.repository }}.git
+            git remote set-url origin $REPO_URL
             git fetch origin ${{ github.ref_name }} --depth 1
             git reset --hard FETCH_HEAD
           fi
 
       - name: 2. 执行容器部署
         run: |
-          # 1. 变量标准化处理
+          # 1. 获取小写的镜像 ID
           IMAGE_ID=ghcr.io/${{ github.repository }}
           IMAGE_ID=$(echo "${IMAGE_ID}" | tr '[A-Z]' '[a-z]')
           
-          # 2. 版本自动识别
+          # 2. 处理版本号
           SAFE_VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
-          export IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
+          IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
           
-          echo "🚀 部署镜像: ${IMAGE_FULL_NAME}"
+          echo "🚀 正在部署镜像: ${IMAGE_FULL_NAME}"
 
-          # 3. 登录镜像库 (使用内置 Token)
+          # 3. 将变量写入 .env 文件供 docker-compose 使用
+          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env
+
+          # 4. 登录镜像库
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # 4. 生产环境部署标准动作
+          # 5. 部署
           docker compose pull
           docker compose up -d
           
-          # 5. 存储空间管理
+          # 6. 清理过期镜像
           docker image prune -f
           echo "✅ 部署完成！"
