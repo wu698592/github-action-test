@@ -2,48 +2,66 @@ name: Deploy to Server
 
 on:
   workflow_dispatch: # 手动触发部署
-
+    inputs:
+          manual_tag:
+            description: '【可选】手动指定镜像 Tag (如: sha-1663e5d)。留空则自动按分支或tag Hash 部署。'
+            required: false
+            default: ''
+            
 jobs:
   deploy:
     runs-on: [self-hosted, jinan-1]
-    
+      
     steps:
-      - name: 1. 拉取最新代码
-        run: |
-          echo "Checking out ${{ github.ref_name }}..."
-          # 使用 GITHUB_TOKEN 解决私有仓库拉取时的用户名密码问题
-          REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          
-          if [ ! -d ".git" ]; then
-            git clone --depth 1 -b ${{ github.ref_name }} $REPO_URL .
-          else
-            git remote set-url origin $REPO_URL
-            git fetch origin ${{ github.ref_name }} --depth 1
-            git reset --hard FETCH_HEAD
-          fi
+      - name: 1. 拉取代码
+        uses: actions/checkout@v4
 
-      - name: 2. 执行容器部署
+      # ✨ tr '[A-Z]' '[a-z]' 逻辑
+      - name: 2. 提取镜像元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            # 自动处理 sha-xxxxxxx 格式
+            type=sha,format=short,prefix=sha-
+            # 如果是 Tag 触发，自动处理 v1.2.3 格式
+            type=ref,event=tag
+
+      # ✨ docker login 逻辑
+      - name: 3. 登录 GitHub 镜像库
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 4. 执行部署
         run: |
-          # 1. 获取小写的镜像 ID
-          IMAGE_ID=ghcr.io/${{ github.repository }}
-          IMAGE_ID=$(echo "${IMAGE_ID}" | tr '[A-Z]' '[a-z]')
+          # 如果手动输入了 tag，覆盖掉 meta 自动生成的
+          if [ -n "${{ github.event.inputs.manual_tag }}" ]; then
+            IMAGE_FULL_NAME="ghcr.io/${{ github.repository_owner }}/ai-core:${{ github.event.inputs.manual_tag }}"
+          else
+            # 默认使用 meta action 算出来的第一个 tag (即 sha-xxx)
+            IMAGE_FULL_NAME="${{ fromJson(steps.meta.outputs.json).tags[0] }}"
+          fi
           
-          # 2. 处理版本号
-          SAFE_VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
-          IMAGE_FULL_NAME="${IMAGE_ID}:${SAFE_VERSION}"
+          # 转换为小写（防止 repository_owner 包含大写）
+          IMAGE_FULL_NAME=$(echo "$IMAGE_FULL_NAME" | tr '[A-Z]' '[a-z]')
           
+          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env
           echo "🚀 正在部署镜像: ${IMAGE_FULL_NAME}"
 
-          # 3. 将变量写入 .env 文件供 docker-compose 使用
-          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env
+          # 预拉取，防止 manifest unknown
+          docker pull ${IMAGE_FULL_NAME}
+          
+          # 启动
+          docker compose up -d --force-recreate
+          
+          # 清理旧镜像
+          docker image prune -af --filter "until=168h"
 
-          # 4. 登录镜像库
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          
-          # 5. 部署
-          docker compose pull
-          docker compose up -d
-          
-          # 6. 清理过期镜像
-          docker image prune -f
-          echo "✅ 部署完成！"
+      - name: 5. 检查运行状态
+        run: |
+          docker compose ps
+          echo "容器健康检查结束。"
