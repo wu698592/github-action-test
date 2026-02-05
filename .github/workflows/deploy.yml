@@ -38,9 +38,11 @@ jobs:
 
       - name: 4. 执行部署
         run: |
+          REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[A-Z]' '[a-z]')
+
           # 如果手动输入了 tag，覆盖掉 meta 自动生成的
           if [ -n "${{ github.event.inputs.manual_tag }}" ]; then
-            IMAGE_FULL_NAME="ghcr.io/${{ github.repository_owner }}/ai-core:${{ github.event.inputs.manual_tag }}"
+            IMAGE_FULL_NAME="ghcr.io/${{ github.repository_owner }}/${REPO_NAME}:${{ github.event.inputs.manual_tag }}"
           else
             # 默认使用 meta action 算出来的第一个 tag (即 sha-xxx)
             IMAGE_FULL_NAME="${{ fromJson(steps.meta.outputs.json).tags[0] }}"
