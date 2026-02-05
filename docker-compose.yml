@@ -3,6 +3,4 @@ services:
     # 脚本里的 export 会填充这个变量
     image: ${IMAGE_FULL_NAME}
     container_name: my-test-container
-    ports:
-      - "56789:80"
     restart: always
