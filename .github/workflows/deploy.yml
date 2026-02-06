@@ -36,9 +36,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 4. 深度排错部署
+      - name: 4. 执行部署
         run: |
-          # --- [诊断 1] 基础变量检查 ---
+          # 1. 变量准备
           REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[A-Z]' '[a-z]')
           OWNER_NAME=$(echo "${{ github.repository_owner }}" | tr '[A-Z]' '[a-z]')
           DEPLOY_DIR="/data1/${REPO_NAME}"
@@ -50,39 +50,25 @@ jobs:
           fi
           IMAGE_FULL_NAME=$(echo "$IMAGE_FULL_NAME" | tr '[A-Z]' '[a-z]')
 
-          echo "🔍 [CHECK] 最终生成的变量 IMAGE_FULL_NAME 为: ${IMAGE_FULL_NAME}"
+          echo "🚀 准备部署镜像: ${IMAGE_FULL_NAME}"
 
-          # --- [诊断 2] 目录与文件状态 ---
+          # 2. 目录同步与文件准备
           mkdir -p "$DEPLOY_DIR"
-          echo "📂 [CHECK] 当前工作目录 (PWD): $(pwd)"
-          echo "📂 [CHECK] 目标部署目录 (DEPLOY_DIR): ${DEPLOY_DIR}"
+          # 预拉取镜像减少停机时间
+          docker pull ${IMAGE_FULL_NAME}
           
-          # 同步代码
+          echo "🔄 同步代码文件到 ${DEPLOY_DIR}..."
           rsync -avz --delete --exclude '.git' --exclude '.env*' ./ ${DEPLOY_DIR}/
           
           cd ${DEPLOY_DIR}
-          echo "📂 [CHECK] 进入目录后的 PWD: $(pwd)"
-          echo "📄 [CHECK] 当前目录下的文件清单:"
-          ls -la
 
-          # --- [诊断 3] YAML 内容校验 ---
-          echo "📄 [CHECK] docker-compose.yml 中关于 image 的定义如下:"
-          grep "image:" docker-compose.yml || echo "❌ 警告：在 yml 中没找到 image 关键字！"
-
-          # --- [诊断 4] 变量写入校验 ---
+          # 3. 写入环境变量
           echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env.image
           printf "%b" "${{ secrets.ENV_FILE_CONTENT }}" > .env
-          
-          echo "📄 [CHECK] .env.image 文件内容:"
-          cat .env.image
-          echo "📄 [CHECK] .env 文件末尾几行 (脱敏):"
-          tail -n 3 .env | sed 's/./*/g' # 仅确认有内容写入
 
-          # --- [诊断 5] Docker 环境感知测试 ---
-          echo "🐳 [CHECK] 尝试在不运行命令的情况下，让 Compose 解析配置:"
-          # 使用 config 命令可以查看 Compose 最终解析出来的结果，不真正启动
-          IMAGE_FULL_NAME=${IMAGE_FULL_NAME} docker compose config
-
-          # --- [诊断 6] 最终尝试启动 ---
-          echo "🚀 [EXEC] 执行最终启动命令..."
+          # 4. 执行启动 (注入变量)
+          echo "🐳 启动 Docker 容器..."
           IMAGE_FULL_NAME=${IMAGE_FULL_NAME} docker compose up -d --force-recreate
+
+          # 5. 清理一周前的旧镜像
+          docker image prune -af --filter "until=168h"
