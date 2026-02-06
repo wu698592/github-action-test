@@ -36,34 +36,53 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 4. 执行部署
+      - name: 4. 深度排错部署
         run: |
+          # --- [诊断 1] 基础变量检查 ---
           REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[A-Z]' '[a-z]')
+          OWNER_NAME=$(echo "${{ github.repository_owner }}" | tr '[A-Z]' '[a-z]')
+          DEPLOY_DIR="/data1/${REPO_NAME}"
 
-          # 如果手动输入了 tag，覆盖掉 meta 自动生成的
           if [ -n "${{ github.event.inputs.manual_tag }}" ]; then
-            IMAGE_FULL_NAME="ghcr.io/${{ github.repository_owner }}/${REPO_NAME}:${{ github.event.inputs.manual_tag }}"
+            IMAGE_FULL_NAME="ghcr.io/${OWNER_NAME}/${REPO_NAME}:${{ github.event.inputs.manual_tag }}"
           else
-            # 默认使用 meta action 算出来的第一个 tag (即 sha-xxx)
             IMAGE_FULL_NAME="${{ fromJson(steps.meta.outputs.json).tags[0] }}"
           fi
-          
-          # 转换为小写（防止 repository_owner 包含大写）
           IMAGE_FULL_NAME=$(echo "$IMAGE_FULL_NAME" | tr '[A-Z]' '[a-z]')
-          
-          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env
-          echo "🚀 正在部署镜像: ${IMAGE_FULL_NAME}"
 
-          # 预拉取，防止 manifest unknown
-          docker pull ${IMAGE_FULL_NAME}
-          
-          # 启动
-          docker compose up -d --force-recreate
-          
-          # 清理旧镜像
-          docker image prune -af --filter "until=168h"
+          echo "🔍 [CHECK] 最终生成的变量 IMAGE_FULL_NAME 为: ${IMAGE_FULL_NAME}"
 
-      - name: 5. 检查运行状态
-        run: |
-          docker compose ps
-          echo "容器健康检查结束。"
+          # --- [诊断 2] 目录与文件状态 ---
+          mkdir -p "$DEPLOY_DIR"
+          echo "📂 [CHECK] 当前工作目录 (PWD): $(pwd)"
+          echo "📂 [CHECK] 目标部署目录 (DEPLOY_DIR): ${DEPLOY_DIR}"
+          
+          # 同步代码
+          rsync -avz --delete --exclude '.git' --exclude '.env*' ./ ${DEPLOY_DIR}/
+          
+          cd ${DEPLOY_DIR}
+          echo "📂 [CHECK] 进入目录后的 PWD: $(pwd)"
+          echo "📄 [CHECK] 当前目录下的文件清单:"
+          ls -la
+
+          # --- [诊断 3] YAML 内容校验 ---
+          echo "📄 [CHECK] docker-compose.yml 中关于 image 的定义如下:"
+          grep "image:" docker-compose.yml || echo "❌ 警告：在 yml 中没找到 image 关键字！"
+
+          # --- [诊断 4] 变量写入校验 ---
+          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env.image
+          printf "%b" "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          
+          echo "📄 [CHECK] .env.image 文件内容:"
+          cat .env.image
+          echo "📄 [CHECK] .env 文件末尾几行 (脱敏):"
+          tail -n 3 .env | sed 's/./*/g' # 仅确认有内容写入
+
+          # --- [诊断 5] Docker 环境感知测试 ---
+          echo "🐳 [CHECK] 尝试在不运行命令的情况下，让 Compose 解析配置:"
+          # 使用 config 命令可以查看 Compose 最终解析出来的结果，不真正启动
+          IMAGE_FULL_NAME=${IMAGE_FULL_NAME} docker compose config
+
+          # --- [诊断 6] 最终尝试启动 ---
+          echo "🚀 [EXEC] 执行最终启动命令..."
+          IMAGE_FULL_NAME=${IMAGE_FULL_NAME} docker compose up -d --force-recreate
