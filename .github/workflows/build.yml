@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*'  # 自动触发：正式版
   workflow_dispatch:
-    # 手动触发：无需输入，直接选分支即可
+  # 手动触发：无需输入，直接选分支即可
 
 jobs:
   build-and-push:
@@ -17,14 +17,14 @@ jobs:
     steps:
       - name: 1. 拉取代码
         uses: actions/checkout@v4
-        
-      # ✨ 新增：使用官方元数据工具
+
       - name: 2. 生成镜像元数据
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,format=short,prefix=sha-

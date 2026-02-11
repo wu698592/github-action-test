@@ -3,21 +3,34 @@ name: Deploy to Server
 on:
   workflow_dispatch: # 手动触发部署
     inputs:
-          manual_tag:
-            description: '【可选】手动指定镜像 Tag (如: sha-1663e5d)。留空则自动按分支或tag Hash 部署。'
-            required: false
-            default: ''
-            
+      manual_tag:
+        description: '【可选】手动指定镜像 Tag (如: v1.0.1 或sha-1663e5d)。留空则拉最新commit部署。'
+        required: false
+        default: ''
+
 jobs:
   deploy:
     runs-on: [self-hosted, jinan-1]
-      
+
+    env:
+      # 定义需要部署的文件列表
+      DEPLOY_FILES: "Dockerfile docker-compose.yml requirements.txt nginx.conf"
+      DEPLOY_DIRS: "nginx"
+
     steps:
       - name: 1. 拉取代码
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.manual_tag || github.sha }}
+          sparse-checkout: |
+            nginx/
+            Dockerfile
+            docker-compose.yml
+            requirements.txt
+            nginx.conf
+          sparse-checkout-cone-mode: false
 
-      # ✨ tr '[A-Z]' '[a-z]' 逻辑
-      - name: 2. 提取镜像元数据
+      - name: 2. 基于当前触发环境（Commit 或 Tag）生成对应的镜像标签
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -28,7 +41,6 @@ jobs:
             # 如果是 Tag 触发，自动处理 v1.2.3 格式
             type=ref,event=tag
 
-      # ✨ docker login 逻辑
       - name: 3. 登录 GitHub 镜像库
         uses: docker/login-action@v3
         with:
@@ -36,39 +48,76 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 4. 执行部署
+      - name: 4. 确定镜像全名
+        id: get_info
         run: |
-          # 1. 变量准备
           REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[A-Z]' '[a-z]')
           OWNER_NAME=$(echo "${{ github.repository_owner }}" | tr '[A-Z]' '[a-z]')
-          DEPLOY_DIR="/data1/${REPO_NAME}"
-
+          
           if [ -n "${{ github.event.inputs.manual_tag }}" ]; then
-            IMAGE_FULL_NAME="ghcr.io/${OWNER_NAME}/${REPO_NAME}:${{ github.event.inputs.manual_tag }}"
+            IMAGE="ghcr.io/${OWNER_NAME}/${REPO_NAME}:${{ github.event.inputs.manual_tag }}"
           else
-            IMAGE_FULL_NAME="${{ fromJson(steps.meta.outputs.json).tags[0] }}"
+            IMAGE=$(echo '${{ steps.meta.outputs.json }}' | jq -r '.tags[] | select(contains("sha-"))' | head -n 1)
           fi
-          IMAGE_FULL_NAME=$(echo "$IMAGE_FULL_NAME" | tr '[A-Z]' '[a-z]')
+          
+          # 转换为全小写并存入 Step 输出和环境变量
+          IMAGE_LOWER=$(echo "$IMAGE" | tr '[A-Z]' '[a-z]')
+          echo "IMAGE_NAME=$IMAGE_LOWER" >> $GITHUB_ENV
+          echo "REPO_LOWER=$REPO_NAME" >> $GITHUB_ENV
+          echo "🚀 目标镜像: $IMAGE_LOWER"
 
-          echo "🚀 准备部署镜像: ${IMAGE_FULL_NAME}"
+      - name: 5. 拉取镜像
+        run: |
+          echo "🔍 正在检查镜像是否存在: ${{ env.IMAGE_NAME }}"
+          if ! docker pull ${{ env.IMAGE_NAME }}; then
+            echo "::error::在 GHCR 中找不到镜像 [${{ env.IMAGE_NAME }}]。请先运行 Build 工作流！"
+            exit 1
+          fi
 
-          # 2. 目录同步与文件准备
+      - name: 6. 同步配置文件
+        run: |
+          DEPLOY_DIR="/data1/${{ env.REPO_LOWER }}"
+          NGINX_DEST_DIR="/data1/nginx/nginx-conf/conf.d"
+          
           mkdir -p "$DEPLOY_DIR"
-          # 预拉取镜像减少停机时间
-          docker pull ${IMAGE_FULL_NAME}
           
-          echo "🔄 同步代码文件到 ${DEPLOY_DIR}..."
-          rsync -avz --delete --exclude '.git' --exclude '.env*' ./ ${DEPLOY_DIR}/
+          # 复制基础文件
+          for file in ${{ env.DEPLOY_FILES }}; do
+            [ -f "$file" ] && cp -f "$file" "$DEPLOY_DIR/" && echo "✅ 复制: $file"
+          done
           
-          cd ${DEPLOY_DIR}
+          # 同步目录 (rsync)
+          for dir in ${{ env.DEPLOY_DIRS }}; do
+            [ -d "$dir" ] && rsync -avz --delete "$dir/" "$DEPLOY_DIR/$dir/"
+          done
 
-          # 3. 写入环境变量
-          echo "IMAGE_FULL_NAME=${IMAGE_FULL_NAME}" > .env.image
+          # 同步 Nginx .inc 配置
+          if [ -d "./nginx" ]; then
+            mkdir -p $NGINX_DEST_DIR
+            find "./nginx" -name "*.inc" -type f -exec cp {} $NGINX_DEST_DIR/ \;
+            echo "✅ Nginx .inc 文件同步完成"
+          fi
+
+      - name: 7. 启动 Docker 容器
+        run: |
+          cd /data1/${{ env.REPO_LOWER }}
+          # 注入环境变量
+          export IMAGE_FULL_NAME=${{ env.IMAGE_NAME }}
           printf "%b" "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          
+          docker compose up -d --force-recreate
+          sleep 5
+          docker logs iam-app --tail 10
 
-          # 4. 执行启动 (注入变量)
-          echo "🐳 启动 Docker 容器..."
-          IMAGE_FULL_NAME=${IMAGE_FULL_NAME} docker compose up -d --force-recreate
+      - name: 8. 刷新 Nginx 配置
+        run: |
+          if docker exec iam_nginx_proxy nginx -t; then
+              docker exec iam_nginx_proxy nginx -s reload
+              echo "✅ Nginx 热重载成功"
+          else
+              echo "::error::Nginx 配置语法错误，未执行重载！"
+              exit 1
+          fi
 
-          # 5. 清理一周前的旧镜像
-          docker image prune -af --filter "until=168h"
+      - name: 9. 清理旧镜像
+        run: docker image prune -af --filter "until=168h"
