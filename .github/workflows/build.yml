@@ -1,4 +1,10 @@
 name: Build and Push Image
+run-name: >-
+  ${{ github.ref_type == 'tag' && '📦【正式打包】' || '🛠️【测试打包】' }}
+  - ${{ github.ref_name }}
+  - (@${{ github.actor }})
+  - @${{ github.sha }}
+  - ${{ github.event.head_commit.message || '手动触发' }}
 
 on:
   push:
@@ -45,11 +51,12 @@ jobs:
         with:
           context: .
           push: true
-          # ✨ 直接引用 meta 生成的 tags，它会自动处理小写转换和逗号分隔
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secrets: |
+            "ENV_FILE_CONTENT=${{ secrets.ENV_FILE_CONTENT }}"
 
       - name: 6. 状态报告
         run: |

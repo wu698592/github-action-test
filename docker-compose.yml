@@ -1,6 +1,18 @@
 services:
-  web-app:
-    # 脚本里的 export 会填充这个变量
+  ${CONTAINER_NAME}:
     image: ${IMAGE_FULL_NAME}
-    container_name: my-test-container
-    restart: always
+    container_name: ${CONTAINER_NAME}
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/nginx.conf  # 前端用
+      - ${LOG_DIR}:/var/log/nginx
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - ${NETWORK_NAME}
+
+networks:
+  ${NETWORK_NAME}:
+    external: true

@@ -1,10 +1,19 @@
 name: Deploy to Server
-
+run-name: >-
+  ${{
+    github.event.inputs.manual_tag != '' && '🛑【输入指定版本发布】' ||
+    github.ref_type == 'tag' && '🚀【正式发布】' ||
+    '🚲【测试发布】'
+  }}
+  - ${{ github.event.inputs.manual_tag != '' && github.event.inputs.manual_tag || github.ref_name }}
+  - (@${{ github.actor }})
+  - @${{ github.sha }}
+  
 on:
   workflow_dispatch: # 手动触发部署
     inputs:
       manual_tag:
-        description: '【可选】手动指定镜像 Tag (如: v1.0.1 或sha-1663e5d)。留空则拉最新commit部署。'
+        description: '可选：填写要部署的镜像 Tag（如 v1.0.1 或 sha-1663e5d）。留空则按上方选择的分支或 Tag 部署。'
         required: false
         default: ''
 
