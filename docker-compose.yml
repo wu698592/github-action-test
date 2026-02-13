@@ -1,5 +1,5 @@
 services:
-  ${CONTAINER_NAME}:
+  app:
     image: ${IMAGE_FULL_NAME}
     container_name: ${CONTAINER_NAME}
     restart: unless-stopped
@@ -11,8 +11,9 @@ services:
     environment:
       - TZ=Asia/Shanghai
     networks:
-      - ${NETWORK_NAME}
+      - app_network
 
 networks:
-  ${NETWORK_NAME}:
+  app_network:
+    name: ${NETWORK_NAME}
     external: true

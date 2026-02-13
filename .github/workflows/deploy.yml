@@ -114,7 +114,7 @@ jobs:
           export IMAGE_FULL_NAME=${{ env.IMAGE_NAME }}
           printf "%b" "${{ secrets.ENV_FILE_CONTENT }}" > .env
           
-          docker compose up -d --force-recreate
+          docker compose --env-file .env up -d --force-recreate
           sleep 5
           docker logs iam-app --tail 10
 
