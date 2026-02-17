@@ -1,45 +1,63 @@
-# --- 忽略依赖和打包产物 ---
-node_modules
-**/node_modules
-dist
-**/dist
-build
-.npm
-.eslintcache
+# ==========================================================
+# 全能型 Docker 忽略清单 (前端 + Go + Python + Java)
+# ==========================================================
 
-# --- 忽略本地开发环境配置 ---
-.env
-.env.local
-.env.*.local
-
-# --- 忽略 Git 和 IDE 相关文件 ---
+# --- 1. 忽略通用的开发工具与系统缓存 ---
 .git
 .gitignore
 .github
 .vscode
 .idea
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# --- 忽略后端代码 (假设你的后端在 backend 文件夹) ---
-# 既然这个 Dockerfile 是给前端用的，就不需要让它看到后端代码
-# 请根据你实际的后端文件夹名称进行修改
-server/
-backend/
-bin/
-*.go
-*.py
-*.java
-
-# --- 忽略系统临时文件 ---
 .DS_Store
 Thumbs.db
-
-# --- 忽略日志文件 ---
+*.sw?
 *.log
+
+# --- 2. 前端相关 (Node.js) ---
+node_modules/
+**/node_modules/
+dist/
+build/
+.npm
+.eslintcache
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
+
+# --- 3. Python 相关 (AI/视频生成) ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.pytest_cache/
+.coverage
+*.pth
+# 忽略巨大的 AI 模型文件，建议通过卷(Volume)挂载
+*.weights
+*.onnx
+*.pth
+
+# --- 4. Go 相关 (直播流) ---
+bin/
+*.test
+*.out
+vendor/
+
+# --- 5. Java 相关 (业务后台) ---
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+build/
+*.tlog
+*.log
+
+# --- 6. 本地敏感信息 (绝对不能打进镜像) ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
