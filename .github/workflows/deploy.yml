@@ -10,7 +10,7 @@ run-name: >-
   - @${{ github.sha }}
   
 on:
-  workflow_dispatch: # 手动触发部署
+  workflow_dispatch:
     inputs:
       manual_tag:
         description: '可选：填写要部署的镜像 Tag（如 v1.0.1 或 sha-1663e5d）。留空则按上方选择的分支或 Tag 部署。'
@@ -22,7 +22,6 @@ jobs:
     runs-on: [self-hosted, jinan-1]
 
     env:
-      # 定义需要部署的文件列表
       DEPLOY_FILES: "Dockerfile docker-compose.yml requirements.txt nginx.conf"
       DEPLOY_DIRS: "nginx"
 
@@ -45,9 +44,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            # 自动处理 sha-xxxxxxx 格式
             type=sha,format=short,prefix=sha-
-            # 如果是 Tag 触发，自动处理 v1.2.3 格式
             type=ref,event=tag
 
       - name: 3. 登录 GitHub 镜像库
@@ -69,7 +66,6 @@ jobs:
             IMAGE=$(echo '${{ steps.meta.outputs.json }}' | jq -r '.tags[] | select(contains("sha-"))' | head -n 1)
           fi
           
-          # 转换为全小写并存入 Step 输出和环境变量
           IMAGE_LOWER=$(echo "$IMAGE" | tr '[A-Z]' '[a-z]')
           echo "IMAGE_NAME=$IMAGE_LOWER" >> $GITHUB_ENV
           echo "REPO_LOWER=$REPO_NAME" >> $GITHUB_ENV
@@ -90,17 +86,14 @@ jobs:
           
           mkdir -p "$DEPLOY_DIR"
           
-          # 复制基础文件
           for file in ${{ env.DEPLOY_FILES }}; do
             [ -f "$file" ] && cp -f "$file" "$DEPLOY_DIR/" && echo "✅ 复制: $file"
           done
           
-          # 同步目录 (rsync)
           for dir in ${{ env.DEPLOY_DIRS }}; do
             [ -d "$dir" ] && rsync -avz --delete "$dir/" "$DEPLOY_DIR/$dir/"
           done
 
-          # 同步 Nginx .inc 配置
           if [ -d "./nginx" ]; then
             mkdir -p $NGINX_DEST_DIR
             find "./nginx" -name "*.inc" -type f -exec cp {} $NGINX_DEST_DIR/ \;
@@ -110,13 +103,26 @@ jobs:
       - name: 7. 启动 Docker 容器
         run: |
           cd /data1/${{ env.REPO_LOWER }}
-          # 注入环境变量
           export IMAGE_FULL_NAME=${{ env.IMAGE_NAME }}
           printf "%b" "${{ secrets.ENV_FILE_CONTENT }}" > .env
           
           docker compose --env-file .env up -d --force-recreate
-          sleep 5
-          docker logs iam-app --tail 10
+
+          sleep 15
+          
+          TOTAL_SERVICES=$(docker compose config --services | wc -l)
+          RUNNING_COUNT=$(docker compose ps --format "{{.State}}" | grep -E "running|Up" | wc -l)
+          
+          echo "📊 状态汇总: 预期服务数 $TOTAL_SERVICES, 实际运行数 $RUNNING_COUNT"
+          
+          if [ "$RUNNING_COUNT" -lt "$TOTAL_SERVICES" ]; then
+            echo "❌ 部分容器启动失败，打印项目日志："
+            docker compose logs --tail 100
+            exit 1
+          else
+            echo "✅ 所有容器 ($RUNNING_COUNT/$TOTAL_SERVICES) 运行正常"
+            docker compose logs --tail 20
+          fi
 
       - name: 8. 刷新 Nginx 配置
         run: |

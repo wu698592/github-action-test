@@ -6,7 +6,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/nginx.conf  # 前端用
       - ${LOG_DIR}:/var/log/nginx
     environment:
       - TZ=Asia/Shanghai
